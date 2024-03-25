@@ -9,7 +9,7 @@ sudo sysctl -w net.ipv4.ip_forward=1
 
 # Ställ in statisk IP på ens5 och DHCP på ens4
 # Ersätt IP_ADDRESS med den önskade statiska IP-adressen för ens5 och DHCP_RANGE med det önskade DHCP-området för ens4
-sudo ip addr add IP_ADDRESS dev ens5
+sudo ip addr add 192.168.1.1/255.255.255.0 dev ens5
 sudo ip link set dev ens5 up
 sudo ip addr flush dev ens4
 sudo dhclient ens4
