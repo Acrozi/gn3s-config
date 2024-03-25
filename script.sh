@@ -1,3 +1,13 @@
+#Aktibvera så att internet fungerar
+
+# sudo ip link set ens4 up
+# sudo dhclient -v ens4
+
+# ladda ner skriptet på:
+# curl -O andreymsh.se/script.sh
+
+#gör den körbar chmod +x script.sh 
+
 #!/bin/bash
 
 # Installera SSH om det inte redan är installerat
@@ -11,13 +21,25 @@ if [[ $(sysctl -n net.ipv4.ip_forward) != 1 ]]; then
     sudo sysctl -w net.ipv4.ip_forward=1
 fi
 
-# Ställ in statisk IP på ens5 och begär IP från DHCP på ens4
-if ! ip addr show ens5 | grep -q "192.168.1.1/24"; then
-    sudo ip addr add 192.168.1.1/255.255.255.0 dev ens5
-    sudo ip link set dev ens5 up
-fi
-sudo ip addr flush dev ens4
-sudo dhclient ens4
+# Ta bort befintlig IP-adress från ens5 om den finns
+sudo ip addr flush dev ens5
+
+# Ändra konfigurationen i /etc/network/interfaces
+sudo tee /etc/network/interfaces > /dev/null <<EOF
+auto lo
+iface lo inet loopback
+
+auto ens4
+iface ens4 inet dhcp
+
+auto ens5
+iface ens5 inet static
+    address 192.168.1.1
+    netmask 255.255.255.0
+EOF
+
+# Starta om nätverket för att tillämpa ändringarna
+sudo systemctl restart networking
 
 # Installera och konfigurera DHCP-server om det inte redan är installerat
 if ! dpkg -l | grep -q isc-dhcp-server; then
@@ -26,12 +48,23 @@ if ! dpkg -l | grep -q isc-dhcp-server; then
     sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="ens5"/' /etc/default/isc-dhcp-server
     # Konfigurera DHCP-servern
     sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak  # Säkerhetskopiera konfigurationsfilen
-    sudo tee -a /etc/dhcp/dhcpd.conf > /dev/null <<EOF
-subnet ens4 netmask 255.255.255.0 {
+    if sudo tee -a /etc/dhcp/dhcpd.conf > /dev/null <<EOF
+
+option domain-name-servers 8.8.8.8, 8.8.4.4;
+option routers 192.168.1.1;
+
+subnet 192.168.1.0 netmask 255.255.255.0 {
   range 192.168.1.100 192.168.1.200;
-  option broadcast-adress 192.168.1.255;
+  option broadcast-address 192.168.1.255;
 }
 EOF
+    then
+        echo "Tee-kommando kördes"
+    else
+        echo "Tee-kommandot misslyckades" >&2
+        exit 1
+    fi
+
     sudo systemctl restart isc-dhcp-server
 fi
 
@@ -71,6 +104,7 @@ table inet nat {
 }
 EOF
     sudo systemctl restart nftables
+    sudo systemctl restart isc-dhcp-server
 fi
 
 echo "Installation och konfiguration av nätverkskomponenter är klar."
