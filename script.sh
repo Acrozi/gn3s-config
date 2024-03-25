@@ -1,39 +1,45 @@
 #!/bin/bash
 
-# Installera SSH
-sudo apt update
-sudo apt install -y openssh-server
+# Installera SSH om det inte redan är installerat
+if ! command -v ssh &> /dev/null; then
+    sudo apt update
+    sudo apt install -y openssh-server
+fi
 
-# Aktivera IP forwarding på ens5
-sudo sysctl -w net.ipv4.ip_forward=1
+# Aktivera IP forwarding om det inte redan är aktiverat
+if [[ $(sysctl -n net.ipv4.ip_forward) != 1 ]]; then
+    sudo sysctl -w net.ipv4.ip_forward=1
+fi
 
-# Ställ in statisk IP på ens5 och DHCP på ens4
-# Ersätt IP_ADDRESS med den önskade statiska IP-adressen för ens5 och DHCP_RANGE med det önskade DHCP-området för ens4
-sudo ip addr add 192.168.1.1/255.255.255.0 dev ens5
-sudo ip link set dev ens5 up
+# Ställ in statisk IP på ens5 och begär IP från DHCP på ens4
+if ! ip addr show ens5 | grep -q "192.168.1.1/24"; then
+    sudo ip addr add 192.168.1.1/255.255.255.0 dev ens5
+    sudo ip link set dev ens5 up
+fi
 sudo ip addr flush dev ens4
 sudo dhclient ens4
 
-# Installera och konfigurera DHCP-server
-sudo apt install -y isc-dhcp-server
-
-# Ändra DHCP-serverkonfigurationen för att använda ens5
-sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="ens5"/' /etc/default/isc-dhcp-server
-
-# Konfigurera DHCP-servern
-sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak  # Säkerhetskopiera konfigurationsfilen
-sudo tee -a /etc/dhcp/dhcpd.conf > /dev/null <<EOF
-subnet ens4 netmask <NETMASK> {
-  range <DHCP_RANGE_START> <DHCP_RANGE_END>;
+# Installera och konfigurera DHCP-server om det inte redan är installerat
+if ! dpkg -l | grep -q isc-dhcp-server; then
+    sudo apt install -y isc-dhcp-server
+    # Ändra DHCP-serverkonfigurationen för att använda ens5
+    sudo sed -i 's/INTERFACESv4=""/INTERFACESv4="ens5"/' /etc/default/isc-dhcp-server
+    # Konfigurera DHCP-servern
+    sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak  # Säkerhetskopiera konfigurationsfilen
+    sudo tee -a /etc/dhcp/dhcpd.conf > /dev/null <<EOF
+subnet ens4 netmask 255.255.255.0 {
+  range 192.168.1.100 192.168.1.200;
+  option broadcast-adress 192.168.1.255;
 }
 EOF
+    sudo systemctl restart isc-dhcp-server
+fi
 
-sudo systemctl restart isc-dhcp-server
-
-# Installera och konfigurera Nftables
-sudo apt install -y nftables
-# Skapa och applicera Nftables-regler
-sudo tee /etc/nftables.conf > /dev/null <<EOF
+# Installera och konfigurera Nftables om det inte redan är installerat
+if ! dpkg -l | grep -q nftables; then
+    sudo apt install -y nftables
+    # Skapa och applicera Nftables-regler
+    sudo tee /etc/nftables.conf > /dev/null <<EOF
 #!/usr/sbin/nft -f
 
 flush ruleset
@@ -64,7 +70,7 @@ table inet nat {
     }
 }
 EOF
-
-sudo systemctl restart nftables
+    sudo systemctl restart nftables
+fi
 
 echo "Installation och konfiguration av nätverkskomponenter är klar."
